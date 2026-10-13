@@ -1,0 +1,3 @@
+export function Loading({ text = "Loading data..." }) { return <div className="state"><div className="spinner"/><span>{text}</span></div>; }
+export function ErrorState({ message, retry }) { return <div className="state"><strong>Something went wrong</strong><span>{message}</span>{retry && <button className="btn primary" onClick={retry}>Try again</button>}</div>; }
+export function EmptyState({ text = "No data available." }) { return <div className="state"><strong>No data</strong><span>{text}</span></div>; }
