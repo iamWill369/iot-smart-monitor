@@ -31,8 +31,8 @@ export default function SensorDetails() {
   const [device, setDevice] = useState(null);
   const [devError, setDevError] = useState("");
 
-  const sensor = useSensorData(false);
-  const history = useHistory(24);
+ const sensor = useSensorData(false, deviceId);
+const history = useHistory(24, deviceId);
 
   useEffect(() => {
     let active = true;

@@ -1,7 +1,8 @@
+
 import { useCallback, useEffect, useState } from "react";
 import { getHistoricalSensorData } from "../services/api";
 
-export function useHistory(hours = 24) {
+export function useHistory(hours = 24, deviceId = "ENV-001") {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -10,15 +11,19 @@ export function useHistory(hours = 24) {
     try {
       setLoading(true);
       setError("");
-      setData(await getHistoricalSensorData(hours));
+
+      const result = await getHistoricalSensorData(hours, deviceId);
+      setData(result);
     } catch (err) {
       setError(err.message || "Unable to load history");
     } finally {
       setLoading(false);
     }
-  }, [hours]);
+  }, [hours, deviceId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return { data, loading, error, reload: load };
 }
