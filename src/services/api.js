@@ -21,10 +21,8 @@ async function getWeather() {
   const params = new URLSearchParams({
     latitude: config.location.latitude,
     longitude: config.location.longitude,
-    current:
-      "temperature_2m,relative_humidity_2m,surface_pressure",
-    hourly:
-      "temperature_2m,relative_humidity_2m,surface_pressure",
+    current: "temperature_2m,relative_humidity_2m,surface_pressure",
+    hourly: "temperature_2m,relative_humidity_2m,surface_pressure",
     timezone: config.location.timezone,
     forecast_days: "2",
   });
@@ -84,35 +82,62 @@ const demoDevices = [
   },
 ].map((device, index) => ({
   ...device,
-  lastSeen: new Date(
-    Date.now() - index * 90_000
-  ).toISOString(),
+  lastSeen: new Date(Date.now() - index * 90_000).toISOString(),
 }));
+
+const demoOffsets = {
+  "ENV-001": { temperature: 0, humidity: 0, pressure: 0, air: 0 },
+  "ENV-002": { temperature: 2.4, humidity: -8, pressure: -2, air: 12 },
+  "ENV-003": { temperature: -1.6, humidity: 6, pressure: 1.5, air: 25 },
+};
+
+function applyOffset(value, offset, minimum = -Infinity) {
+  if (value == null || !Number.isFinite(Number(value))) return value;
+  return Math.max(minimum, Number((Number(value) + offset).toFixed(1)));
+}
+
+function simulateReading(reading, deviceId) {
+  const offset = demoOffsets[deviceId] || demoOffsets["ENV-001"];
+
+  return {
+    ...reading,
+    temperature: applyOffset(reading.temperature, offset.temperature),
+    humidity: applyOffset(reading.humidity, offset.humidity, 0),
+    pressure: applyOffset(reading.pressure, offset.pressure, 0),
+    pm25: applyOffset(reading.pm25, offset.air, 0),
+    pm10: applyOffset(reading.pm10, offset.air * 1.4, 0),
+    co: reading.co,
+    no2: reading.no2,
+  };
+}
 
 export async function getLatestSensorData(deviceId = "ENV-001") {
   if (config.mode === "real") {
     const params = new URLSearchParams({ deviceId });
-
-    return request(
-      `${config.backendUrl}/sensors/latest?${params}`
-    );
+    return request(`${config.backendUrl}/sensors/latest?${params}`);
   }
 
-  const [weather, air] = await Promise.all([
-    getWeather(),
-    getAirQuality(),
-  ]);
+  const device = demoDevices.find((item) => item.id === deviceId);
 
-  return {
-    timestamp: weather.current.time,
-    temperature: weather.current.temperature_2m,
-    humidity: weather.current.relative_humidity_2m,
-    pressure: weather.current.surface_pressure,
-    pm25: air.current.pm2_5,
-    pm10: air.current.pm10,
-    co: air.current.carbon_monoxide,
-    no2: air.current.nitrogen_dioxide,
-  };
+  if (!device || device.status === "offline") {
+    throw new Error("This sensor is offline or does not exist.");
+  }
+
+  const [weather, air] = await Promise.all([getWeather(), getAirQuality()]);
+
+  return simulateReading(
+    {
+      timestamp: weather.current.time,
+      temperature: weather.current.temperature_2m,
+      humidity: weather.current.relative_humidity_2m,
+      pressure: weather.current.surface_pressure,
+      pm25: air.current.pm2_5,
+      pm10: air.current.pm10,
+      co: air.current.carbon_monoxide,
+      no2: air.current.nitrogen_dioxide,
+    },
+    deviceId
+  );
 }
 
 export async function getHistoricalSensorData(
@@ -125,23 +150,32 @@ export async function getHistoricalSensorData(
       hours: String(hours),
     });
 
-    return request(
-      `${config.backendUrl}/sensors/history?${params}`
-    );
+    return request(`${config.backendUrl}/sensors/history?${params}`);
   }
 
-  const [weather, air] = await Promise.all([
-    getWeather(),
-    getAirQuality(),
-  ]);
+  const device = demoDevices.find((item) => item.id === deviceId);
+
+  if (!device || device.status === "offline") {
+    throw new Error("Historical data is unavailable for this sensor.");
+  }
+
+  const [weather, air] = await Promise.all([getWeather(), getAirQuality()]);
+
+  const time = weather.hourly.time.slice(0, hours);
+  const temperature = weather.hourly.temperature_2m.slice(0, hours);
+  const humidity = weather.hourly.relative_humidity_2m.slice(0, hours);
+  const pressure = weather.hourly.surface_pressure.slice(0, hours);
+  const pm25 = air.hourly.pm2_5.slice(0, hours);
+  const pm10 = air.hourly.pm10.slice(0, hours);
+  const offset = demoOffsets[deviceId] || demoOffsets["ENV-001"];
 
   return {
-    time: weather.hourly.time.slice(0, hours),
-    temperature: weather.hourly.temperature_2m.slice(0, hours),
-    humidity: weather.hourly.relative_humidity_2m.slice(0, hours),
-    pressure: weather.hourly.surface_pressure.slice(0, hours),
-    pm25: air.hourly.pm2_5.slice(0, hours),
-    pm10: air.hourly.pm10.slice(0, hours),
+    time,
+    temperature: temperature.map((v) => applyOffset(v, offset.temperature)),
+    humidity: humidity.map((v) => applyOffset(v, offset.humidity, 0)),
+    pressure: pressure.map((v) => applyOffset(v, offset.pressure, 0)),
+    pm25: pm25.map((v) => applyOffset(v, offset.air, 0)),
+    pm10: pm10.map((v) => applyOffset(v, offset.air * 1.4, 0)),
   };
 }
 
