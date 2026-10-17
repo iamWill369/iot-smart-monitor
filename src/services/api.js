@@ -1,48 +1,6 @@
 
 import { config } from "../config";
 
-async function request(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.headers || {}),
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-async function getWeather() {
-  const params = new URLSearchParams({
-    latitude: config.location.latitude,
-    longitude: config.location.longitude,
-    current: "temperature_2m,relative_humidity_2m,surface_pressure",
-    hourly: "temperature_2m,relative_humidity_2m,surface_pressure",
-    timezone: config.location.timezone,
-    forecast_days: "2",
-  });
-
-  return request(`${config.demo.weather}?${params}`);
-}
-
-async function getAirQuality() {
-  const params = new URLSearchParams({
-    latitude: config.location.latitude,
-    longitude: config.location.longitude,
-    current: "pm2_5,pm10,carbon_monoxide,nitrogen_dioxide",
-    hourly: "pm2_5,pm10,carbon_monoxide,nitrogen_dioxide",
-    timezone: config.location.timezone,
-    forecast_days: "2",
-  });
-
-  return request(`${config.demo.airQuality}?${params}`);
-}
-
 const demoDevices = [
   {
     id: "ENV-001",
@@ -82,33 +40,80 @@ const demoDevices = [
   },
 ].map((device, index) => ({
   ...device,
-  lastSeen: new Date(Date.now() - index * 90_000).toISOString(),
+  lastSeen: new Date(Date.now() - index * 90000).toISOString(),
 }));
 
-const demoOffsets = {
-  "ENV-001": { temperature: 0, humidity: 0, pressure: 0, air: 0 },
-  "ENV-002": { temperature: 2.4, humidity: -8, pressure: -2, air: 12 },
-  "ENV-003": { temperature: -1.6, humidity: 6, pressure: 1.5, air: 25 },
+const baseReading = {
+  temperature: 29.5,
+  humidity: 68,
+  pressure: 1012.4,
+  pm25: 18,
+  pm10: 32,
+  co: 210,
+  no2: 14,
 };
 
-function applyOffset(value, offset, minimum = -Infinity) {
-  if (value == null || !Number.isFinite(Number(value))) return value;
-  return Math.max(minimum, Number((Number(value) + offset).toFixed(1)));
-}
+const offsets = {
+  "ENV-001": { temperature: 0, humidity: 0, air: 0 },
+  "ENV-002": { temperature: 2.4, humidity: -8, air: 12 },
+  "ENV-003": { temperature: -1.6, humidity: 6, air: 25 },
+};
 
-function simulateReading(reading, deviceId) {
-  const offset = demoOffsets[deviceId] || demoOffsets["ENV-001"];
+function makeReading(deviceId) {
+  const offset = offsets[deviceId] || offsets["ENV-001"];
 
   return {
-    ...reading,
-    temperature: applyOffset(reading.temperature, offset.temperature),
-    humidity: applyOffset(reading.humidity, offset.humidity, 0),
-    pressure: applyOffset(reading.pressure, offset.pressure, 0),
-    pm25: applyOffset(reading.pm25, offset.air, 0),
-    pm10: applyOffset(reading.pm10, offset.air * 1.4, 0),
-    co: reading.co,
-    no2: reading.no2,
+    timestamp: new Date().toISOString(),
+    temperature: baseReading.temperature + offset.temperature,
+    humidity: Math.max(0, baseReading.humidity + offset.humidity),
+    pressure: baseReading.pressure,
+    pm25: baseReading.pm25 + offset.air,
+    pm10: baseReading.pm10 + offset.air * 1.4,
+    co: baseReading.co,
+    no2: baseReading.no2,
   };
+}
+
+function makeHistory(hours, deviceId) {
+  const current = makeReading(deviceId);
+  const count = Math.max(1, Math.min(Number(hours) || 24, 48));
+
+  const time = [];
+  const temperature = [];
+  const humidity = [];
+  const pressure = [];
+  const pm25 = [];
+  const pm10 = [];
+
+  for (let i = count - 1; i >= 0; i--) {
+    const date = new Date(Date.now() - i * 60 * 60 * 1000);
+    const wave = Math.sin(i / 3) * 1.2;
+
+    time.push(date.toISOString());
+    temperature.push(Number((current.temperature + wave).toFixed(1)));
+    humidity.push(Number((current.humidity + Math.cos(i / 4) * 3).toFixed(1)));
+    pressure.push(Number((current.pressure + Math.sin(i / 5) * 1.5).toFixed(1)));
+    pm25.push(Number((current.pm25 + Math.sin(i / 2) * 2).toFixed(1)));
+    pm10.push(Number((current.pm10 + Math.cos(i / 3) * 3).toFixed(1)));
+  }
+
+  return { time, temperature, humidity, pressure, pm25, pm10 };
+}
+
+async function request(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  return response.json();
 }
 
 export async function getLatestSensorData(deviceId = "ENV-001") {
@@ -123,21 +128,7 @@ export async function getLatestSensorData(deviceId = "ENV-001") {
     throw new Error("This sensor is offline or does not exist.");
   }
 
-  const [weather, air] = await Promise.all([getWeather(), getAirQuality()]);
-
-  return simulateReading(
-    {
-      timestamp: weather.current.time,
-      temperature: weather.current.temperature_2m,
-      humidity: weather.current.relative_humidity_2m,
-      pressure: weather.current.surface_pressure,
-      pm25: air.current.pm2_5,
-      pm10: air.current.pm10,
-      co: air.current.carbon_monoxide,
-      no2: air.current.nitrogen_dioxide,
-    },
-    deviceId
-  );
+  return makeReading(deviceId);
 }
 
 export async function getHistoricalSensorData(
@@ -159,24 +150,7 @@ export async function getHistoricalSensorData(
     throw new Error("Historical data is unavailable for this sensor.");
   }
 
-  const [weather, air] = await Promise.all([getWeather(), getAirQuality()]);
-
-  const time = weather.hourly.time.slice(0, hours);
-  const temperature = weather.hourly.temperature_2m.slice(0, hours);
-  const humidity = weather.hourly.relative_humidity_2m.slice(0, hours);
-  const pressure = weather.hourly.surface_pressure.slice(0, hours);
-  const pm25 = air.hourly.pm2_5.slice(0, hours);
-  const pm10 = air.hourly.pm10.slice(0, hours);
-  const offset = demoOffsets[deviceId] || demoOffsets["ENV-001"];
-
-  return {
-    time,
-    temperature: temperature.map((v) => applyOffset(v, offset.temperature)),
-    humidity: humidity.map((v) => applyOffset(v, offset.humidity, 0)),
-    pressure: pressure.map((v) => applyOffset(v, offset.pressure, 0)),
-    pm25: pm25.map((v) => applyOffset(v, offset.air, 0)),
-    pm10: pm10.map((v) => applyOffset(v, offset.air * 1.4, 0)),
-  };
+  return makeHistory(hours, deviceId);
 }
 
 export async function getDevices() {

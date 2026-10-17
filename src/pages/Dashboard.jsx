@@ -1,8 +1,15 @@
 
 import { useState, useCallback } from "react";
 import {
-  Activity, Droplets, Gauge, Wind, RefreshCw, Server, MapPin
+  Activity,
+  Droplets,
+  Gauge,
+  Wind,
+  RefreshCw,
+  Server,
+  MapPin,
 } from "lucide-react";
+
 import { config } from "../config";
 import { useSensorData } from "../hooks/useSensorData";
 import { useHistory } from "../hooks/useHistory";
@@ -11,21 +18,31 @@ import StatusBadge from "../components/common/StatusBadge";
 import PageHeader from "../components/common/PageHeader";
 import ChartCard from "../components/common/ChartCard";
 import { Loading, ErrorState, EmptyState } from "../components/common/State";
+
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  Tooltip, CartesianGrid
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
 } from "recharts";
 
 const fmt = (n, digits = 1) =>
-  n !== null && n !== undefined && n !== "" && Number.isFinite(Number(n))
+  n !== null &&
+  n !== undefined &&
+  n !== "" &&
+  Number.isFinite(Number(n))
     ? Number(n).toFixed(digits)
     : "--";
 
 const time = (v) => {
   if (!v || Number.isNaN(new Date(v).getTime())) return "--";
+
   return new Date(v).toLocaleTimeString([], {
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   });
 };
 
@@ -34,12 +51,19 @@ export default function Dashboard() {
   const history = useHistory(24);
   const [metric, setMetric] = useState("temperature");
 
+  const refreshing = sensor.refreshing || history.refreshing;
+
   const refreshAll = useCallback(() => {
     sensor.refresh();
     history.reload();
   }, [sensor.refresh, history.reload]);
 
-  if (sensor.loading || history.loading) {
+  // Show the initial loading screen only while required data
+  // has not loaded for the first time.
+  if (
+    (sensor.loading && !sensor.data) ||
+    (history.loading && !history.data)
+  ) {
     return (
       <section className="content">
         <PageHeader
@@ -51,13 +75,30 @@ export default function Dashboard() {
     );
   }
 
-  if (sensor.error || history.error) {
+  // Show a full error screen only when data is unavailable.
+  // If previous data exists, keep the dashboard visible.
+  if (
+    (sensor.error && !sensor.data) ||
+    (history.error && !history.data)
+  ) {
     return (
       <section className="content">
         <PageHeader
           title="Overview"
           subtitle="Live environmental monitoring dashboard"
+          action={
+            <button
+              type="button"
+              className="btn"
+              onClick={refreshAll}
+              disabled={refreshing}
+            >
+              <RefreshCw size={15} />
+              {refreshing ? "Refreshing..." : "Retry"}
+            </button>
+          }
         />
+
         <ErrorState
           message={sensor.error || history.error}
           retry={refreshAll}
@@ -74,7 +115,7 @@ export default function Dashboard() {
       <section className="content">
         <PageHeader
           title="Overview"
-          subtitle="Live environmental monitoring dashboard"
+          subtitle="Live environmental sensor monitoring"
         />
         <EmptyState text="Sensor readings are not available yet." />
       </section>
@@ -87,29 +128,29 @@ export default function Dashboard() {
       title: "Temperature",
       value: fmt(data.temperature),
       unit: "°C",
-      caption: "Ambient sensor"
+      caption: "Ambient sensor",
     },
     {
       icon: Droplets,
       title: "Humidity",
       value: fmt(data.humidity),
       unit: "%",
-      caption: "Relative humidity"
+      caption: "Relative humidity",
     },
     {
       icon: Gauge,
       title: "Pressure",
       value: fmt(data.pressure),
       unit: "hPa",
-      caption: "Atmospheric pressure"
+      caption: "Atmospheric pressure",
     },
     {
       icon: Wind,
       title: "PM2.5",
       value: fmt(data.pm25),
       unit: "µg/m³",
-      caption: "Air quality"
-    }
+      caption: "Air quality",
+    },
   ];
 
   const chartData = Array.isArray(series.time)
@@ -118,7 +159,7 @@ export default function Dashboard() {
         temperature: series.temperature?.[i],
         humidity: series.humidity?.[i],
         pressure: series.pressure?.[i],
-        pm25: series.pm25?.[i]
+        pm25: series.pm25?.[i],
       }))
     : [];
 
@@ -126,7 +167,7 @@ export default function Dashboard() {
     temperature: "Temperature (°C)",
     humidity: "Humidity (%)",
     pressure: "Pressure (hPa)",
-    pm25: "PM2.5 (µg/m³)"
+    pm25: "PM2.5 (µg/m³)",
   };
 
   const apiLabel =
@@ -138,11 +179,33 @@ export default function Dashboard() {
         title="Overview"
         subtitle="Environmental sensor monitoring"
         action={
-          <button className="btn" onClick={refreshAll}>
-            <RefreshCw size={15} /> Refresh
+          <button
+            type="button"
+            className="btn"
+            onClick={refreshAll}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            <RefreshCw size={15} />
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         }
       />
+
+      {(sensor.error || history.error) && (
+        <div className="alert" role="alert">
+          Could not refresh all dashboard data:{" "}
+          {sensor.error || history.error}
+          <button
+            type="button"
+            className="btn"
+            onClick={refreshAll}
+            disabled={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Retry"}
+          </button>
+        </div>
+      )}
 
       <div className="metrics">
         {values.map((v) => (
@@ -186,12 +249,12 @@ export default function Dashboard() {
                     background: "#0d1d30",
                     border: "1px solid rgba(148,163,184,.18)",
                     borderRadius: 12,
-                    color: "#fff"
+                    color: "#fff",
                   }}
                   labelFormatter={time}
                   formatter={(value, name) => [
                     fmt(value),
-                    metricLabels[name] || name
+                    metricLabels[name] || name,
                   ]}
                 />
                 <Line
@@ -238,10 +301,17 @@ export default function Dashboard() {
           <div className="system-health">
             <div>
               <span>API Status</span>
-              <b>Request successful</b>
+              <b>{sensor.error || history.error
+                ? "Refresh failed"
+                : "Request successful"}
+              </b>
             </div>
             <div className="progress">
-              <i style={{ width: "100%" }} />
+              <i
+                style={{
+                  width: sensor.error || history.error ? "60%" : "100%",
+                }}
+              />
             </div>
           </div>
         </article>
@@ -260,7 +330,7 @@ export default function Dashboard() {
             {[
               ["PM10", fmt(data.pm10), "µg/m³"],
               ["CO", fmt(data.co, 0), "µg/m³"],
-              ["NO₂", fmt(data.no2), "µg/m³"]
+              ["NO₂", fmt(data.no2), "µg/m³"],
             ].map(([name, value, unit]) => (
               <div key={name}>
                 <span>{name}</span>

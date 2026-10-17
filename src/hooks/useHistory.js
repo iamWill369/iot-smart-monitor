@@ -5,11 +5,13 @@ import { getHistoricalSensorData } from "../services/api";
 export function useHistory(hours = 24, deviceId = "ENV-001") {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
+    setRefreshing(true);
+
     try {
-      setLoading(true);
       setError("");
 
       const result = await getHistoricalSensorData(hours, deviceId);
@@ -18,6 +20,7 @@ export function useHistory(hours = 24, deviceId = "ENV-001") {
       setError(err.message || "Unable to load history");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [hours, deviceId]);
 
@@ -25,5 +28,11 @@ export function useHistory(hours = 24, deviceId = "ENV-001") {
     load();
   }, [load]);
 
-  return { data, loading, error, reload: load };
+  return {
+    data,
+    loading,
+    refreshing,
+    error,
+    reload: load,
+  };
 }
