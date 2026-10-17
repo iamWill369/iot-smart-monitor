@@ -77,15 +77,17 @@ const history = useHistory(24, deviceId);
     );
   }
 
-  if (sensor.error || history.error || devError) {
+  
+  if (devError) {
     return (
       <section className="content">
         <PageHeader
-          title="Sensor Details"
-          subtitle="Device-level readings and history"
+          title="Sensor Not Found"
+          subtitle="The requested device does not exist."
         />
         <ErrorState
-          message={sensor.error || history.error || devError}
+          title="Sensor Not Found"
+          message={devError}
         />
         <Link className="btn" to="/devices">
           <ArrowLeft size={15} /> Back to Device Fleet
@@ -93,6 +95,47 @@ const history = useHistory(24, deviceId);
       </section>
     );
   }
+
+  if (device?.status === "offline") {
+    return (
+      <section className="content">
+        <PageHeader
+          title={device.name}
+          subtitle={`${device.id} • ${device.location}`}
+        />
+        <ErrorState
+          title="Device Offline"
+          message="This device is currently offline. Sensor readings are unavailable until it reconnects."
+        />
+        <Link className="btn" to="/devices">
+          <ArrowLeft size={15} /> Back to Device Fleet
+        </Link>
+      </section>
+    );
+  }
+
+  if (sensor.error || history.error) {
+    return (
+      <section className="content">
+        <PageHeader
+          title={device?.name || "Sensor Details"}
+          subtitle="Device-level readings and history"
+        />
+        <ErrorState
+          title="Unable to Load Sensor Data"
+          message={sensor.error || history.error}
+          retry={() => {
+            sensor.refresh();
+            history.reload();
+          }}
+        />
+        <Link className="btn" to="/devices">
+          <ArrowLeft size={15} /> Back to Device Fleet
+        </Link>
+      </section>
+    );
+  }
+
 
   if (!sensor.data || !history.data) {
     return (
