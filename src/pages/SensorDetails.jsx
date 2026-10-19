@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   Activity,
@@ -7,15 +7,18 @@ import {
   Gauge,
   Wind,
   ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
+
 import { getDevices } from "../services/api";
 import { useSensorData } from "../hooks/useSensorData";
+import { useHistory } from "../hooks/useHistory";
 import PageHeader from "../components/common/PageHeader";
 import MetricCard from "../components/common/MetricCard";
 import StatusBadge from "../components/common/StatusBadge";
 import ChartCard from "../components/common/ChartCard";
 import { Loading, ErrorState } from "../components/common/State";
-import { useHistory } from "../hooks/useHistory";
+
 import {
   ResponsiveContainer,
   LineChart,
@@ -28,12 +31,43 @@ import {
 
 export default function SensorDetails() {
   const { deviceId } = useParams();
+
   const [device, setDevice] = useState(null);
   const [devError, setDevError] = useState("");
+  const [manualRefreshing, setManualRefreshing] = useState(false);
 
- const sensor = useSensorData(false, deviceId);
-const history = useHistory(24, deviceId);
+  const refreshLock = useRef(false);
 
+  const sensor = useSensorData(false, deviceId);
+  const history = useHistory(24, deviceId);
+
+  const refreshing =
+    manualRefreshing || sensor.refreshing || history.refreshing;
+
+  // Refresh both the latest readings and historical chart data.
+  const refreshAll = useCallback(async () => {
+    if (refreshLock.current) return;
+
+    refreshLock.current = true;
+    setManualRefreshing(true);
+
+    try {
+      // Allow React to display the refreshing indicator first.
+      await new Promise((resolve) =>
+        requestAnimationFrame(resolve)
+      );
+
+      await Promise.all([
+        sensor.refresh(),
+        history.reload(),
+      ]);
+    } finally {
+      refreshLock.current = false;
+      setManualRefreshing(false);
+    }
+  }, [sensor.refresh, history.reload]);
+
+  // Load the selected device.
   useEffect(() => {
     let active = true;
 
@@ -56,7 +90,9 @@ const history = useHistory(24, deviceId);
       })
       .catch((error) => {
         if (active) {
-          setDevError(error.message || "Unable to load device");
+          setDevError(
+            error.message || "Unable to load device."
+          );
         }
       });
 
@@ -65,7 +101,12 @@ const history = useHistory(24, deviceId);
     };
   }, [deviceId]);
 
-  if (sensor.loading || history.loading || (!device && !devError)) {
+  // Initial loading state.
+  if (
+    sensor.loading ||
+    history.loading ||
+    (!device && !devError)
+  ) {
     return (
       <section className="content">
         <PageHeader
@@ -77,7 +118,7 @@ const history = useHistory(24, deviceId);
     );
   }
 
-  
+  // Unknown device.
   if (devError) {
     return (
       <section className="content">
@@ -85,17 +126,21 @@ const history = useHistory(24, deviceId);
           title="Sensor Not Found"
           subtitle="The requested device does not exist."
         />
+
         <ErrorState
           title="Sensor Not Found"
           message={devError}
         />
+
         <Link className="btn" to="/devices">
-          <ArrowLeft size={15} /> Back to Device Fleet
+          <ArrowLeft size={15} />
+          Back to Device Fleet
         </Link>
       </section>
     );
   }
 
+  // Offline device.
   if (device?.status === "offline") {
     return (
       <section className="content">
@@ -103,70 +148,114 @@ const history = useHistory(24, deviceId);
           title={device.name}
           subtitle={`${device.id} • ${device.location}`}
         />
+
         <ErrorState
           title="Device Offline"
           message="This device is currently offline. Sensor readings are unavailable until it reconnects."
         />
+
         <Link className="btn" to="/devices">
-          <ArrowLeft size={15} /> Back to Device Fleet
+          <ArrowLeft size={15} />
+          Back to Device Fleet
         </Link>
       </section>
     );
   }
 
+  // Show errors with a working retry action.
   if (sensor.error || history.error) {
     return (
       <section className="content">
         <PageHeader
-          title={device?.name || "Sensor Details"}
-          subtitle="Device-level readings and history"
+          title={device.name}
+          subtitle={`${device.id} • ${device.location}`}
+          action={
+            <button
+              type="button"
+              className="btn"
+              onClick={refreshAll}
+              disabled={refreshing}
+            >
+              <RefreshCw
+                size={15}
+                className={refreshing ? "spin" : ""}
+              />
+              {refreshing ? "Refreshing..." : "Retry"}
+            </button>
+          }
         />
+
         <ErrorState
           title="Unable to Load Sensor Data"
           message={sensor.error || history.error}
-          retry={() => {
-            sensor.refresh();
-            history.reload();
-          }}
+          retry={refreshAll}
         />
+
         <Link className="btn" to="/devices">
-          <ArrowLeft size={15} /> Back to Device Fleet
+          <ArrowLeft size={15} />
+          Back to Device Fleet
         </Link>
       </section>
     );
   }
 
-
   if (!sensor.data || !history.data) {
     return (
       <section className="content">
-        <PageHeader title="Sensor Details" />
+        <PageHeader
+          title={device.name}
+          subtitle={`${device.id} • ${device.location}`}
+          action={
+            <button
+              type="button"
+              className="btn"
+              onClick={refreshAll}
+              disabled={refreshing}
+            >
+              <RefreshCw
+                size={15}
+                className={refreshing ? "spin" : ""}
+              />
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+          }
+        />
+
         <p>No sensor data is available.</p>
       </section>
     );
   }
 
-  const d = sensor.data;
+  const reading = sensor.data;
 
   const historicalTimes = history.data.time ?? [];
-  const historicalTemperatures = history.data.temperature ?? [];
+  const historicalTemperatures =
+    history.data.temperature ?? [];
 
   const rows = historicalTimes
     .map((time, index) => ({
       time,
-      temperature: Number(historicalTemperatures[index]),
+      temperature: Number(
+        historicalTemperatures[index]
+      ),
     }))
-    .filter((row) => Number.isFinite(row.temperature));
+    .filter((row) =>
+      Number.isFinite(row.temperature)
+    );
 
-  const validTemperatures = rows.map((row) => row.temperature);
+  const validTemperatures = rows.map(
+    (row) => row.temperature
+  );
 
   const temperatureStats = validTemperatures.length
     ? {
         min: Math.min(...validTemperatures),
         max: Math.max(...validTemperatures),
         avg:
-          validTemperatures.reduce((sum, value) => sum + value, 0) /
-          validTemperatures.length,
+          validTemperatures.reduce(
+            (sum, value) => sum + value,
+            0
+          ) / validTemperatures.length,
       }
     : null;
 
@@ -176,44 +265,78 @@ const history = useHistory(24, deviceId);
         title={device.name}
         subtitle={`${device.id} • ${device.location}`}
         action={
-          <Link className="btn" to="/devices">
-            <ArrowLeft size={15} /> Device Fleet
-          </Link>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={refreshAll}
+              disabled={refreshing}
+              aria-busy={refreshing}
+            >
+              <RefreshCw
+                size={15}
+                className={refreshing ? "spin" : ""}
+              />
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+
+            <Link className="btn" to="/devices">
+              <ArrowLeft size={15} />
+              Device Fleet
+            </Link>
+          </div>
         }
       />
+
+      {refreshing && (
+        <p role="status" aria-live="polite">
+          Updating sensor readings and historical data...
+        </p>
+      )}
 
       <div className="detail-top">
         <div className="metrics">
           <MetricCard
             icon={Activity}
             title="Temperature"
-            value={Number.isFinite(Number(d.temperature))
-              ? Number(d.temperature).toFixed(1)
-              : "—"}
+            value={
+              Number.isFinite(Number(reading.temperature))
+                ? Number(reading.temperature).toFixed(1)
+                : "—"
+            }
             unit="°C"
           />
+
           <MetricCard
             icon={Droplets}
             title="Humidity"
-            value={Number.isFinite(Number(d.humidity))
-              ? Number(d.humidity).toFixed(1)
-              : "—"}
+            value={
+              Number.isFinite(Number(reading.humidity))
+                ? Number(reading.humidity).toFixed(1)
+                : "—"
+            }
             unit="%"
           />
+
           <MetricCard
             icon={Gauge}
             title="Pressure"
-            value={Number.isFinite(Number(d.pressure))
-              ? Number(d.pressure).toFixed(1)
-              : "—"}
+            value={
+              Number.isFinite(Number(reading.pressure))
+                ? Number(reading.pressure).toFixed(1)
+                : "—"
+            }
             unit="hPa"
           />
+
           <MetricCard
             icon={Wind}
             title="PM2.5"
-            value={Number.isFinite(Number(d.pm25))
-              ? Number(d.pm25).toFixed(1)
-              : "—"}
+            value={
+              Number.isFinite(Number(reading.pm25))
+                ? Number(reading.pm25).toFixed(1)
+                : "—"
+            }
             unit="µg/m³"
           />
         </div>
@@ -224,24 +347,50 @@ const history = useHistory(24, deviceId);
               <h2>Device Information</h2>
               <p>Identity and connectivity</p>
             </div>
+
             <StatusBadge
-              status={device.status === "offline" ? "error" : device.status}
+              status={
+                device.status === "offline"
+                  ? "error"
+                  : device.status
+              }
             >
               {device.status}
             </StatusBadge>
           </div>
 
           <div className="info-list">
-            <div><span>Device type</span><b>{device.type}</b></div>
-            <div><span>Battery</span><b>{device.battery}%</b></div>
-            <div><span>Signal</span><b>{device.signal}%</b></div>
+            <div>
+              <span>Device type</span>
+              <b>{device.type}</b>
+            </div>
+
+            <div>
+              <span>Battery</span>
+              <b>{device.battery}%</b>
+            </div>
+
+            <div>
+              <span>Signal</span>
+              <b>{device.signal}%</b>
+            </div>
+
             <div>
               <span>Last seen</span>
-              <b>{new Date(device.lastSeen).toLocaleString()}</b>
+              <b>
+                {device.lastSeen
+                  ? new Date(
+                      device.lastSeen
+                    ).toLocaleString()
+                  : "—"}
+              </b>
             </div>
           </div>
         </article>
       </div>
+
+      <h2>Temperature Summary</h2>
+      <p>Statistics calculated from historical readings</p>
 
       <div className="metrics">
         {temperatureStats ? (
@@ -253,6 +402,7 @@ const history = useHistory(24, deviceId);
               unit="°C"
               caption="Historical minimum"
             />
+
             <MetricCard
               icon={Activity}
               title="Maximum Temperature"
@@ -260,6 +410,7 @@ const history = useHistory(24, deviceId);
               unit="°C"
               caption="Historical maximum"
             />
+
             <MetricCard
               icon={Activity}
               title="Average Temperature"
@@ -269,7 +420,9 @@ const history = useHistory(24, deviceId);
             />
           </>
         ) : (
-          <p>No valid historical temperature readings available.</p>
+          <p>
+            No valid historical temperature readings available.
+          </p>
         )}
       </div>
 
@@ -280,22 +433,43 @@ const history = useHistory(24, deviceId);
         >
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={rows}>
-              <CartesianGrid stroke="rgba(148,163,184,.08)" />
-              <XAxis dataKey="time" />
+              <CartesianGrid
+                stroke="rgba(148,163,184,.08)"
+              />
+
+              <XAxis
+                dataKey="time"
+                tickFormatter={(value) =>
+                  new Date(value).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                }
+              />
+
               <YAxis />
-              <Tooltip />
+
+              <Tooltip
+                labelFormatter={(value) =>
+                  new Date(value).toLocaleString()
+                }
+              />
+
               <Line
                 dataKey="temperature"
                 name="Temperature"
                 stroke="#38bdf8"
                 strokeWidth={2.5}
                 dot={false}
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
       ) : (
-        <p>No historical temperature data available for this sensor.</p>
+        <p>
+          No historical temperature data available for this sensor.
+        </p>
       )}
     </section>
   );

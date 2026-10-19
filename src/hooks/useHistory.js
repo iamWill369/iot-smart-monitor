@@ -10,14 +10,13 @@ export function useHistory(hours = 24, deviceId = "ENV-001") {
 
   const load = useCallback(async () => {
     setRefreshing(true);
+    setError("");
 
     try {
-      setError("");
-
       const result = await getHistoricalSensorData(hours, deviceId);
       setData(result);
     } catch (err) {
-      setError(err.message || "Unable to load history");
+      setError(err?.message || "Unable to load historical sensor data.");
     } finally {
       setLoading(false);
       setRefreshing(false);

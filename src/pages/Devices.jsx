@@ -1,7 +1,7 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Search, ExternalLink } from "lucide-react";
+import { Search, ExternalLink, RefreshCw } from "lucide-react";
 
 import PageHeader from "../components/common/PageHeader";
 import StatusBadge from "../components/common/StatusBadge";
@@ -11,14 +11,23 @@ import { getDevices } from "../services/api";
 export default function Devices() {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
 
-  async function load() {
-    try {
+  const load = useCallback(async (manual = false) => {
+    if (manual) {
+      setRefreshing(true);
+    } else {
       setLoading(true);
-      setError("");
+    }
+
+    setError("");
+
+    try {
+      // Allow the loading state to render before the request completes.
+      await new Promise((resolve) => requestAnimationFrame(resolve));
 
       const data = await getDevices();
 
@@ -27,27 +36,28 @@ export default function Devices() {
       }
 
       setDevices(data);
-    } catch (e) {
-      setError(e.message || "Failed to load devices.");
+    } catch (err) {
+      setError(err?.message || "Failed to load devices.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const rows = useMemo(
     () =>
       devices.filter(
-        (d) =>
-          (filter === "all" || d.status === filter) &&
-          `${d.name} ${d.id} ${d.location}`
+        (device) =>
+          (filter === "all" || device.status === filter) &&
+          `${device.name} ${device.id} ${device.location}`
             .toLowerCase()
-            .includes(q.toLowerCase())
+            .includes(q.toLowerCase().trim())
       ),
-    [devices, q, filter]
+    [devices, filter, q]
   );
 
   if (loading && devices.length === 0) {
@@ -70,18 +80,20 @@ export default function Devices() {
           subtitle="Connected sensor fleet and connectivity"
           action={
             <button
+              type="button"
               className="btn"
-             onClick={() => {
-  console.log("DEVICES REFRESH CLICKED");
-  load();
-}}
+              onClick={() => load()}
               disabled={loading}
             >
-              {loading ? "Refreshing..." : "↻ Refresh"}
+              <RefreshCw
+                size={15}
+                className={loading ? "spin" : ""}
+              />
+              {loading ? "Loading..." : "Retry"}
             </button>
           }
         />
-        <ErrorState message={error} retry={load} />
+        <ErrorState message={error} retry={() => load()} />
       </section>
     );
   }
@@ -93,12 +105,17 @@ export default function Devices() {
         subtitle="Connected sensor fleet and connectivity"
         action={
           <button
+            type="button"
             className="btn"
-            onClick={load}
-            disabled={loading}
-            aria-busy={loading}
+            onClick={() => load(true)}
+            disabled={refreshing}
+            aria-busy={refreshing}
           >
-            {loading ? "Refreshing..." : "↻ Refresh"}
+            <RefreshCw
+              size={15}
+              className={refreshing ? "spin" : ""}
+            />
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         }
       />
@@ -107,9 +124,10 @@ export default function Devices() {
         <div className="alert" role="alert">
           Could not refresh devices: {error}
           <button
+            type="button"
             className="btn"
-            onClick={load}
-            disabled={loading}
+            onClick={() => load(true)}
+            disabled={refreshing}
           >
             Retry
           </button>
@@ -121,7 +139,7 @@ export default function Devices() {
           <Search size={16} />
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(event) => setQ(event.target.value)}
             placeholder="Search devices..."
             aria-label="Search devices"
           />
@@ -130,7 +148,7 @@ export default function Devices() {
         <select
           className="select"
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(event) => setFilter(event.target.value)}
           aria-label="Filter devices by status"
         >
           <option value="all">All states</option>
@@ -156,53 +174,51 @@ export default function Devices() {
             </thead>
 
             <tbody>
-              {rows.map((d) => (
-                <tr key={d.id}>
+              {rows.map((device) => (
+                <tr key={device.id}>
                   <td>
-                    <strong>{d.name}</strong>
-                    <small>{d.id}</small>
+                    <strong>{device.name}</strong>
+                    <small>{device.id}</small>
                   </td>
 
-                  <td>{d.location}</td>
+                  <td>{device.location}</td>
 
                   <td>
                     <StatusBadge
                       status={
-                        d.status === "offline"
+                        device.status === "offline"
                           ? "error"
-                          : d.status
+                          : device.status
                       }
                     >
-                      {d.status}
+                      {device.status}
                     </StatusBadge>
                   </td>
 
                   <td>
                     <div className="meter-label">
-                      {d.battery}%
+                      {device.battery}%
                     </div>
                     <div className="progress">
                       <i
-                        style={{
-                          width: `${d.battery}%`,
-                        }}
+                        style={{ width: `${device.battery}%` }}
                       />
                     </div>
                   </td>
 
-                  <td>{d.signal}%</td>
+                  <td>{device.signal}%</td>
 
                   <td>
-                    {d.lastSeen
-                      ? new Date(d.lastSeen).toLocaleString()
+                    {device.lastSeen
+                      ? new Date(device.lastSeen).toLocaleString()
                       : "—"}
                   </td>
 
                   <td>
                     <Link
                       className="icon-btn"
-                      to={`/devices/${d.id}`}
-                      aria-label={`View ${d.name} details`}
+                      to={`/devices/${device.id}`}
+                      aria-label={`View ${device.name} details`}
                     >
                       <ExternalLink size={15} />
                     </Link>
@@ -231,14 +247,14 @@ export default function Devices() {
         <div className="stat-card">
           <span>ONLINE</span>
           <strong>
-            {devices.filter((d) => d.status === "online").length}
+            {devices.filter((device) => device.status === "online").length}
           </strong>
         </div>
 
         <div className="stat-card">
           <span>ATTENTION</span>
           <strong>
-            {devices.filter((d) => d.status !== "online").length}
+            {devices.filter((device) => device.status !== "online").length}
           </strong>
         </div>
       </div>

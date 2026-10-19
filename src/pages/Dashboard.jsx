@@ -53,10 +53,19 @@ export default function Dashboard() {
 
   const refreshing = sensor.refreshing || history.refreshing;
 
-  const refreshAll = useCallback(() => {
-    sensor.refresh();
-    history.reload();
-  }, [sensor.refresh, history.reload]);
+const refreshAll = useCallback(async () => {
+  console.log("REFRESH STARTED");
+
+  try {
+    await Promise.all([
+      sensor.refresh(),
+      history.reload(),
+    ]);
+    console.log("REFRESH COMPLETED");
+  } catch (err) {
+    console.error("REFRESH FAILED:", err);
+  }
+}, [sensor.refresh, history.reload]);
 
   // Show the initial loading screen only while required data
   // has not loaded for the first time.
