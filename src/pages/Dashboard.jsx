@@ -23,10 +23,18 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  BarChart,
+  Bar,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
   CartesianGrid,
+  Legend,
 } from "recharts";
 
 const fmt = (n, digits = 1) =>
@@ -50,6 +58,7 @@ export default function Dashboard() {
   const sensor = useSensorData();
   const history = useHistory(24);
   const [metric, setMetric] = useState("temperature");
+  const [chartType, setChartType] = useState("line");
 
   const refreshing = sensor.refreshing || history.refreshing;
 
@@ -179,6 +188,61 @@ const refreshAll = useCallback(async () => {
     pm25: "PM2.5 (µg/m³)",
   };
 
+  // Values used by the selected metric's donut chart.
+  const numericReadings = chartData
+    .map((row) => Number(row[metric]))
+    .filter((value) => Number.isFinite(value));
+
+  const minReading = numericReadings.length
+    ? Math.min(...numericReadings)
+    : 0;
+  const maxReading = numericReadings.length
+    ? Math.max(...numericReadings)
+    : 0;
+  const range = maxReading - minReading;
+
+  const donutData = range === 0
+    ? [{ name: "Available readings", value: numericReadings.length }]
+    : [
+        {
+          name: "Low range",
+          value: numericReadings.filter(
+            (value) => value < minReading + range / 3
+          ).length,
+        },
+        {
+          name: "Medium range",
+          value: numericReadings.filter(
+            (value) =>
+              value >= minReading + range / 3 &&
+              value < minReading + (2 * range) / 3
+          ).length,
+        },
+        {
+          name: "High range",
+          value: numericReadings.filter(
+            (value) => value >= minReading + (2 * range) / 3
+          ).length,
+        },
+      ].filter((item) => item.value > 0);
+
+  const chartColors = ["#66895A", "#A5BC8D", "#D7B66D"];
+
+  const chartTooltipStyle = {
+    backgroundColor: "#FFFFFF",
+    border: "1px solid #DFE9D9",
+    borderRadius: "12px",
+    color: "#304334",
+    boxShadow: "0 8px 24px rgba(47, 72, 46, 0.10)",
+  };
+
+  const metricUnit = {
+    temperature: "°C",
+    humidity: "%",
+    pressure: "hPa",
+    pm25: "µg/m³",
+  };
+
   const apiLabel =
     config.mode === "demo" ? "Demo API" : "Production API";
 
@@ -224,57 +288,230 @@ const refreshAll = useCallback(async () => {
 
       <div className="two-col">
         <ChartCard
-          title="Environmental Trend"
-          subtitle="Historical sensor readings"
+          title={
+            chartType === "line"
+              ? "Environmental Trend"
+              : chartType === "bar"
+                ? "Reading Comparison"
+                : chartType === "area"
+                  ? "Environmental Area Trend"
+                  : "Reading Distribution"
+          }
+          subtitle={`${metricLabels[metric]} · Historical sensor readings`}
           controls={
-            <select
-              className="select"
-              value={metric}
-              onChange={(e) => setMetric(e.target.value)}
-            >
-              <option value="temperature">Temperature</option>
-              <option value="humidity">Humidity</option>
-              <option value="pressure">Pressure</option>
-              <option value="pm25">PM2.5</option>
-            </select>
+            <div className="chart-controls">
+              <select
+                className="select"
+                value={metric}
+                onChange={(e) => setMetric(e.target.value)}
+                aria-label="Select sensor metric"
+              >
+                <option value="temperature">Temperature</option>
+                <option value="humidity">Humidity</option>
+                <option value="pressure">Pressure</option>
+                <option value="pm25">PM2.5</option>
+              </select>
+
+              <select
+                className="select"
+                value={chartType}
+                onChange={(e) => setChartType(e.target.value)}
+                aria-label="Select chart type"
+              >
+                <option value="line">Line Chart</option>
+                <option value="bar">Bar Chart</option>
+                <option value="donut">Donut Chart</option>
+                <option value="area">Area Chart</option>
+              </select>
+            </div>
           }
         >
-          {chartData.length === 0 ? (
-            <EmptyState text="No historical readings available." />
+          {chartData.length === 0 || numericReadings.length === 0 ? (
+            <EmptyState text="No historical readings available for this metric." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid stroke="rgba(148,163,184,.08)" />
-                <XAxis
-                  dataKey="time"
-                  tickFormatter={time}
-                  tick={{ fill: "#71849d", fontSize: 11 }}
-                />
-                <YAxis
-                  tick={{ fill: "#71849d", fontSize: 11 }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "#0d1d30",
-                    border: "1px solid rgba(148,163,184,.18)",
-                    borderRadius: 12,
-                    color: "#fff",
-                  }}
-                  labelFormatter={time}
-                  formatter={(value, name) => [
-                    fmt(value),
-                    metricLabels[name] || name,
-                  ]}
-                />
-                <Line
-                  type="monotone"
-                  dataKey={metric}
-                  stroke="#38bdf8"
-                  strokeWidth={2.5}
-                  dot={false}
-                  connectNulls={false}
-                />
-              </LineChart>
+              {chartType === "donut" ? (
+                <PieChart>
+                  <Tooltip
+                    contentStyle={chartTooltipStyle}
+                    formatter={(value, name) => [`${value} readings`, name]}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    wrapperStyle={{
+                      fontSize: 11,
+                      color: "#667866",
+                      paddingTop: 10,
+                    }}
+                  />
+                  <Pie
+                    data={donutData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="45%"
+                    innerRadius="55%"
+                    outerRadius="76%"
+                    paddingAngle={4}
+                    stroke="#FFFFFF"
+                    strokeWidth={3}
+                    isAnimationActive={false}
+                  >
+                    {donutData.map((entry, index) => (
+                      <Cell
+                        key={entry.name}
+                        fill={chartColors[index % chartColors.length]}
+                      />
+                    ))}
+                  </Pie>
+                </PieChart>
+              ) : chartType === "bar" ? (
+                <BarChart
+                  data={chartData}
+                  margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
+                >
+                  <CartesianGrid
+                    stroke="#EAF0E6"
+                    strokeDasharray="4 5"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={time}
+                    tick={{ fill: "#879486", fontSize: 11 }}
+                    tickLine={{ stroke: "#DCE5D8" }}
+                    axisLine={{ stroke: "#DCE5D8" }}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    tick={{ fill: "#879486", fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={44}
+                  />
+                  <Tooltip
+                    contentStyle={chartTooltipStyle}
+                    labelFormatter={time}
+                    formatter={(value) => [
+                      `${fmt(value)} ${metricUnit[metric]}`,
+                      metricLabels[metric],
+                    ]}
+                  />
+                  <Bar
+                    dataKey={metric}
+                    name={metricLabels[metric]}
+                    fill="#789A68"
+                    radius={[5, 5, 0, 0]}
+                    maxBarSize={30}
+                    isAnimationActive={false}
+                  />
+                </BarChart>
+              ) : chartType === "area" ? (
+                <AreaChart
+                  data={chartData}
+                  margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
+                >
+                  <defs>
+                    <linearGradient
+                      id="sensorAreaGradient"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="0%"
+                        stopColor="#789A68"
+                        stopOpacity={0.35}
+                      />
+                      <stop
+                        offset="95%"
+                        stopColor="#789A68"
+                        stopOpacity={0.02}
+                      />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#EAF0E6" strokeDasharray="4 5" />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={time}
+                    tick={{ fill: "#879486", fontSize: 11 }}
+                    tickLine={{ stroke: "#DCE5D8" }}
+                    axisLine={{ stroke: "#DCE5D8" }}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    tick={{ fill: "#879486", fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={44}
+                  />
+                  <Tooltip
+                    contentStyle={chartTooltipStyle}
+                    labelFormatter={time}
+                    formatter={(value) => [
+                      `${fmt(value)} ${metricUnit[metric]}`,
+                      metricLabels[metric],
+                    ]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey={metric}
+                    name={metricLabels[metric]}
+                    stroke="#66895A"
+                    strokeWidth={2.5}
+                    fill="url(#sensorAreaGradient)"
+                    activeDot={{ r: 4, fill: "#66895A" }}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                </AreaChart>
+              ) : (
+                <LineChart
+                  data={chartData}
+                  margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
+                >
+                  <CartesianGrid stroke="#EAF0E6" strokeDasharray="4 5" />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={time}
+                    tick={{ fill: "#879486", fontSize: 11 }}
+                    tickLine={{ stroke: "#DCE5D8" }}
+                    axisLine={{ stroke: "#DCE5D8" }}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    tick={{ fill: "#879486", fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={44}
+                  />
+                  <Tooltip
+                    contentStyle={chartTooltipStyle}
+                    labelFormatter={time}
+                    formatter={(value) => [
+                      `${fmt(value)} ${metricUnit[metric]}`,
+                      metricLabels[metric],
+                    ]}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey={metric}
+                    name={metricLabels[metric]}
+                    stroke="#66895A"
+                    strokeWidth={2.8}
+                    dot={false}
+                    activeDot={{
+                      r: 5,
+                      fill: "#66895A",
+                      stroke: "#FFFFFF",
+                      strokeWidth: 2,
+                    }}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              )}
             </ResponsiveContainer>
           )}
         </ChartCard>

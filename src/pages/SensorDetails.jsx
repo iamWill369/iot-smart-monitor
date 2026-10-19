@@ -23,11 +23,108 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  BarChart,
+  Bar,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
   CartesianGrid,
 } from "recharts";
+
+const metricLabels = {
+  temperature: "Temperature (°C)",
+  humidity: "Humidity (%)",
+  pressure: "Pressure (hPa)",
+  pm25: "PM2.5 (µg/m³)",
+  pm10: "PM10 (µg/m³)",
+};
+
+const sensorTooltipStyle = {
+  backgroundColor: "#ffffff",
+  border: "1px solid #dfe8da",
+  borderRadius: "10px",
+  color: "#344735",
+  padding: "10px 12px",
+};
+
+const formatSensorTime = (value) =>
+  new Date(value).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+function SensorDonutChart({ rows, metric }) {
+  const values = rows
+    .map((row) => row[metric])
+    .filter(Number.isFinite);
+
+  if (!values.length) {
+    return <p className="sensor-chart-empty">No readings available for this metric.</p>;
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  let donutData;
+
+  if (min === max) {
+    donutData = [{ name: "Available readings", value: values.length }];
+  } else {
+    const range = max - min;
+    const lowLimit = min + range / 3;
+    const midLimit = min + (range * 2) / 3;
+    const counts = { Low: 0, Medium: 0, High: 0 };
+
+    values.forEach((value) => {
+      if (value <= lowLimit) counts.Low += 1;
+      else if (value <= midLimit) counts.Medium += 1;
+      else counts.High += 1;
+    });
+
+    donutData = [
+      { name: "Low range", value: counts.Low },
+      { name: "Medium range", value: counts.Medium },
+      { name: "High range", value: counts.High },
+    ].filter((item) => item.value > 0);
+  }
+
+  const colors = ["#a8c49a", "#789b6b", "#456b42"];
+
+  return (
+    <div className="sensor-donut-wrap">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={donutData}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="48%"
+            innerRadius="52%"
+            outerRadius="76%"
+            paddingAngle={3}
+            isAnimationActive={false}
+          >
+            {donutData.map((entry, index) => (
+              <Cell key={entry.name} fill={colors[index % colors.length]} />
+            ))}
+          </Pie>
+          <Tooltip
+            contentStyle={sensorTooltipStyle}
+            formatter={(value, name) => [`${value} readings`, name]}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <p className="sensor-donut-caption">
+        Distribution of {values.length} actual {metricLabels[metric]} readings
+      </p>
+    </div>
+  );
+}
 
 export default function SensorDetails() {
   const { deviceId } = useParams();
@@ -35,6 +132,8 @@ export default function SensorDetails() {
   const [device, setDevice] = useState(null);
   const [devError, setDevError] = useState("");
   const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [chartType, setChartType] = useState("line");
+  const [chartMetric, setChartMetric] = useState("temperature");
 
   const refreshLock = useRef(false);
 
@@ -228,24 +327,34 @@ export default function SensorDetails() {
 
   const reading = sensor.data;
 
-  const historicalTimes = history.data.time ?? [];
-  const historicalTemperatures =
-    history.data.temperature ?? [];
+  const historicalTimes = Array.isArray(history.data.time)
+    ? history.data.time
+    : [];
 
-  const rows = historicalTimes
-    .map((time, index) => ({
+  // Keep all chart values sourced from the existing history API.
+  const rows = historicalTimes.map((time, index) => {
+    const valueAt = (key) => {
+      const values = history.data[key];
+      if (!Array.isArray(values) || values[index] == null || values[index] === "") {
+        return null;
+      }
+      const value = Number(values[index]);
+      return Number.isFinite(value) ? value : null;
+    };
+
+    return {
       time,
-      temperature: Number(
-        historicalTemperatures[index]
-      ),
-    }))
-    .filter((row) =>
-      Number.isFinite(row.temperature)
-    );
+      temperature: valueAt("temperature"),
+      humidity: valueAt("humidity"),
+      pressure: valueAt("pressure"),
+      pm25: valueAt("pm25"),
+      pm10: valueAt("pm10"),
+    };
+  });
 
-  const validTemperatures = rows.map(
-    (row) => row.temperature
-  );
+  const validTemperatures = rows
+    .map((row) => row.temperature)
+    .filter(Number.isFinite);
 
   const temperatureStats = validTemperatures.length
     ? {
@@ -426,49 +535,139 @@ export default function SensorDetails() {
         )}
       </div>
 
-      {rows.length > 0 ? (
+      {rows.some((row) => Number.isFinite(row[chartMetric])) ? (
         <ChartCard
-          title="Historical Temperature"
-          subtitle={`${rows.length} available readings`}
+          title="Historical Sensor Readings"
+          subtitle={`${rows.filter((row) => Number.isFinite(row[chartMetric])).length} available ${chartMetric} readings`}
         >
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={rows}>
-              <CartesianGrid
-                stroke="rgba(148,163,184,.08)"
-              />
+          <div className="sensor-chart-toolbar">
+            <label className="sensor-chart-control">
+              <span>Metric</span>
+              <select
+                className="select"
+                value={chartMetric}
+                onChange={(event) => setChartMetric(event.target.value)}
+                aria-label="Select sensor metric"
+              >
+                <option value="temperature">Temperature (°C)</option>
+                <option value="humidity">Humidity (%)</option>
+                <option value="pressure">Pressure (hPa)</option>
+                <option value="pm25">PM2.5 (µg/m³)</option>
+                <option value="pm10">PM10 (µg/m³)</option>
+              </select>
+            </label>
 
-              <XAxis
-                dataKey="time"
-                tickFormatter={(value) =>
-                  new Date(value).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
-                }
-              />
+            <label className="sensor-chart-control">
+              <span>Chart</span>
+              <select
+                className="select"
+                value={chartType}
+                onChange={(event) => setChartType(event.target.value)}
+                aria-label="Select chart type"
+              >
+                <option value="line">Line Chart</option>
+                <option value="bar">Bar Chart</option>
+                <option value="area">Area Chart</option>
+                <option value="donut">Donut Chart</option>
+              </select>
+            </label>
+          </div>
 
-              <YAxis />
-
-              <Tooltip
-                labelFormatter={(value) =>
-                  new Date(value).toLocaleString()
-                }
-              />
-
-              <Line
-                dataKey="temperature"
-                name="Temperature"
-                stroke="#38bdf8"
-                strokeWidth={2.5}
-                dot={false}
-                isAnimationActive={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          {chartType === "donut" ? (
+            <SensorDonutChart rows={rows} metric={chartMetric} />
+          ) : (
+            <div className="sensor-chart-plot">
+              <ResponsiveContainer width="100%" height="100%">
+                {chartType === "bar" ? (
+                <BarChart data={rows}>
+                  <CartesianGrid stroke="#e6ede2" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={formatSensorTime}
+                    tick={{ fill: "#71816f", fontSize: 11 }}
+                  />
+                  <YAxis tick={{ fill: "#71816f", fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={sensorTooltipStyle}
+                    labelFormatter={(value) => new Date(value).toLocaleString()}
+                    formatter={(value) => [
+                      Number.isFinite(Number(value)) ? Number(value).toFixed(1) : "—",
+                      metricLabels[chartMetric],
+                    ]}
+                  />
+                  <Bar
+                    dataKey={chartMetric}
+                    name={metricLabels[chartMetric]}
+                    fill="#8eaa7b"
+                    radius={[5, 5, 0, 0]}
+                    isAnimationActive={false}
+                  />
+                </BarChart>
+              ) : chartType === "area" ? (
+                <AreaChart data={rows}>
+                  <CartesianGrid stroke="#e6ede2" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={formatSensorTime}
+                    tick={{ fill: "#71816f", fontSize: 11 }}
+                  />
+                  <YAxis tick={{ fill: "#71816f", fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={sensorTooltipStyle}
+                    labelFormatter={(value) => new Date(value).toLocaleString()}
+                    formatter={(value) => [
+                      Number.isFinite(Number(value)) ? Number(value).toFixed(1) : "—",
+                      metricLabels[chartMetric],
+                    ]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey={chartMetric}
+                    name={metricLabels[chartMetric]}
+                    stroke="#688b5b"
+                    fill="#cbdcc1"
+                    fillOpacity={0.8}
+                    strokeWidth={2.5}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                </AreaChart>
+              ) : (
+                <LineChart data={rows}>
+                  <CartesianGrid stroke="#e6ede2" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={formatSensorTime}
+                    tick={{ fill: "#71816f", fontSize: 11 }}
+                  />
+                  <YAxis tick={{ fill: "#71816f", fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={sensorTooltipStyle}
+                    labelFormatter={(value) => new Date(value).toLocaleString()}
+                    formatter={(value) => [
+                      Number.isFinite(Number(value)) ? Number(value).toFixed(1) : "—",
+                      metricLabels[chartMetric],
+                    ]}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey={chartMetric}
+                    name={metricLabels[chartMetric]}
+                    stroke="#688b5b"
+                    strokeWidth={2.5}
+                    dot={false}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          )}
         </ChartCard>
       ) : (
-        <p>
-          No historical temperature data available for this sensor.
+        <p className="sensor-chart-empty">
+          No historical {metricLabels[chartMetric].toLowerCase()} readings are available for this sensor.
         </p>
       )}
     </section>
