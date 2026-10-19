@@ -295,7 +295,7 @@ export default function SensorDetails() {
       )}
 
       <div className="detail-top">
-        <div className="metrics">
+       <div className="metrics">
           <MetricCard
             icon={Activity}
             title="Temperature"
@@ -392,7 +392,7 @@ export default function SensorDetails() {
       <h2>Temperature Summary</h2>
       <p>Statistics calculated from historical readings</p>
 
-      <div className="metrics">
+      <div className="metrics temperature-summary-grid">
         {temperatureStats ? (
           <>
             <MetricCard
